@@ -1,0 +1,9 @@
+# Wordle Solver - Requirements
+# ============================
+# No external dependencies required!
+# Runs on Python 3.8+ standard library only.
+#
+# Optional development dependencies:
+# pytest          # For running tests
+# black           # For code formatting
+# mypy            # For type checking
