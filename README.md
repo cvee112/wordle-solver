@@ -1,11 +1,14 @@
 # 🟩 Wordle Solver
 
-An optimal Wordle solver using **entropy maximization** — the mathematically best strategy for solving Wordle in the fewest guesses.
+An optimal Wordle solver with two modes: **entropy maximization** (mathematically optimal) and **bot mode** (mimics NYT Wordle Bot behavior).
 
 ## Features
 
-- **Information-theoretic optimal guessing** — maximizes expected information gain at each step
+- **Two solving modes:**
+  - **Entropy mode** (default) — maximizes expected information gain
+  - **Bot mode** — mimics NYT Wordle Bot with curated solutions + word frequency
 - **14,855 word vocabulary** — comprehensive 5-letter English word list
+- **2,315 curated solutions** — official Wordle answer list with frequency data (bot mode)
 - **Dual recommendations** — shows both strategic guesses and best possible answers
 - **Interactive & batch modes** — use interactively or script it
 - **Hard mode support** — restricts suggestions to possible answers only
@@ -41,7 +44,7 @@ Then enter your guesses and the feedback pattern:
    Result: CRANE → ⬛⬛⬛🟨⬛
 
 ════════════════════════════════════════════════════════════
-                    TOP RECOMMENDATIONS
+              TOP RECOMMENDATIONS (ENTROPY MODE)
 ════════════════════════════════════════════════════════════
 Rank  Word       Entropy    Exp.Left   Possible?
 ────────────────────────────────────────────────────────────
@@ -51,10 +54,33 @@ Rank  Word       Entropy    Exp.Left   Possible?
 ...
 ```
 
+### Bot Mode (Mimics NYT Wordle Bot)
+
+```bash
+python wordle_solver.py --bot
+```
+
+Bot mode uses the official ~2,315 word solutions list and scores by expected remaining solutions with word frequency as a tiebreaker — closely matching how the NYT Wordle Bot evaluates guesses.
+
+```
+════════════════════════════════════════════════════════════
+              TOP RECOMMENDATIONS (🤖 BOT MODE)
+════════════════════════════════════════════════════════════
+Rank  Word       Exp.Left   Freq.Score Possible?
+────────────────────────────────────────────────────────────
+1     SLATE      21.3       0.745      ✓ Yes
+2     CRANE      22.1       0.698      ✓ Yes
+...
+```
+
 ### Batch Mode
 
 ```bash
+# Entropy mode
 python wordle_solver.py "crane:xxxyx" "tonus:xygxg"
+
+# Bot mode
+python wordle_solver.py --bot "crane:xxxyx" "tonus:xygxg"
 ```
 
 ### Commands (Interactive Mode)
@@ -71,42 +97,57 @@ Commands use `/` prefix to avoid collision with valid words like "reset".
 ### Options
 
 ```bash
-# Use hard mode (only suggest possible answers)
+# Bot mode (mimic NYT Wordle Bot)
+python wordle_solver.py --bot
+
+# Hard mode (only suggest possible answers)
 python wordle_solver.py --hard
 
-# Use a custom word list
+# Custom word list (valid guesses)
 python wordle_solver.py -w /path/to/mywords.txt
 
+# Custom solutions file (for bot mode)
+python wordle_solver.py --bot -s /path/to/solutions.csv
+
 # Combine options
-python wordle_solver.py --hard -w custom.txt "crane:xxxyx"
+python wordle_solver.py --bot --hard "crane:xxxyx"
 ```
 
-## How It Works
+## Modes Explained
 
-### The Algorithm: Entropy Maximization
+### Entropy Mode (Default)
 
-The solver uses **information theory** to find the optimal guess. For each candidate word, it calculates the **expected information gain** (entropy):
+Uses **information theory** to find the optimal guess by maximizing expected information gain:
 
 ```
 Entropy = -Σ p(pattern) × log₂(p(pattern))
 ```
 
-Where `p(pattern)` is the probability of each possible feedback pattern.
+- Considers all 14,855 words as potential answers
+- Maximizes entropy (information gained per guess)
+- May suggest "strategic" words that can't be the answer but eliminate more possibilities
 
-**Why entropy?**
+### Bot Mode (`--bot`)
 
-A good guess splits the remaining possibilities into many small, roughly equal groups. Entropy quantifies this "spread" — higher entropy means more information gained on average.
+Mimics **NYT Wordle Bot** scoring:
 
-### Example
+- Uses curated 2,315-word solutions list as potential answers
+- Minimizes expected remaining solutions
+- Uses word frequency (from Google's corpus) as tiebreaker
+- Prefers common English words when scores are close
 
-With 100 remaining words:
+| Aspect | Entropy Mode | Bot Mode |
+|--------|--------------|----------|
+| Answer pool | 14,855 words | 2,315 curated |
+| Scoring | Maximize entropy | Minimize expected remaining |
+| Tiebreaker | Letter frequency | Word frequency |
+| Best for | Mathematically optimal | Matching Wordle Bot |
 
-| Guess | Pattern Distribution | Entropy |
-|-------|---------------------|---------|
-| Word A | 50/50 split | 1.0 bit |
-| Word B | 90/10 split | 0.47 bits |
+### Hard Mode (`--hard`)
 
-**Word A is better** — it eliminates more possibilities on average.
+In either mode, `--hard` restricts suggestions to only words that could be the answer (matching Wordle's hard mode rules).
+
+## How It Works
 
 ### Pattern Computation
 
@@ -119,18 +160,29 @@ def get_pattern(guess: str, answer: str) -> str:
     # Greens take priority over yellows
 ```
 
-### Normal vs Hard Mode
+### Entropy Calculation
 
-| Mode | Behavior |
-|------|----------|
-| **Normal** | Considers all 14,855 words — may suggest "strategic" guesses that can't be the answer but eliminate more possibilities |
-| **Hard** (`--hard`) | Only suggests words that could be the answer — matches Wordle's hard mode rules |
+For each candidate guess, compute how well it partitions the remaining possibilities:
+
+```python
+def calculate_entropy(self, guess: str, word_pool: set[str]) -> float:
+    pattern_counts = Counter()
+    for answer in word_pool:
+        pattern = self.get_pattern(guess, answer)
+        pattern_counts[pattern] += 1
+    
+    total = len(word_pool)
+    entropy = -sum((c/total) * log2(c/total) for c in pattern_counts.values())
+    return entropy
+```
+
+Higher entropy = more even split = more information gained = better guess.
 
 ## Output Explained
 
 ```
 ════════════════════════════════════════════════════════════
-                    TOP RECOMMENDATIONS
+              TOP RECOMMENDATIONS (ENTROPY MODE)
 ════════════════════════════════════════════════════════════
 Rank  Word       Entropy    Exp.Left   Possible?
 ────────────────────────────────────────────────────────────
@@ -151,47 +203,30 @@ Rank  Word       Entropy    Exp.Left   Possible?
 
 - **Entropy**: Expected information gain in bits (higher = better)
 - **Exp.Left**: Expected remaining words after this guess (lower = better)
+- **Freq.Score**: Word frequency score (bot mode only, higher = more common)
 - **Possible?**: Whether this word could be the actual answer
 
 ## Recommended Opening Words
 
-Based on entropy analysis against the full word list:
-
-| Word | Entropy |
-|------|---------|
-| SALET | ~6.1 bits |
-| REAST | ~6.1 bits |
-| CRATE | ~5.9 bits |
-| TRACE | ~5.9 bits |
-| SLATE | ~5.8 bits |
-| CRANE | ~5.5 bits |
-
-## Custom Word Lists
-
-The solver loads `words.txt` from the same directory by default. To use a custom list:
-
-1. Create a text file with one 5-letter word per line
-2. Pass it with `-w`:
-
-```bash
-python wordle_solver.py -w my_words.txt
-```
-
-## Performance
-
-- **First guess**: ~15,000 × 15,000 pattern computations (~3-5 seconds)
-- **Later guesses**: Much faster as remaining words decrease
-- **Memory**: ~2 MB for word list
+| Mode | Word | Score |
+|------|------|-------|
+| Entropy | SALET | ~6.1 bits |
+| Entropy | REAST | ~6.1 bits |
+| Entropy | CRATE | ~5.9 bits |
+| Bot | SLATE | exp. ~21 remaining |
+| Bot | CRANE | exp. ~22 remaining |
 
 ## File Structure
 
 ```
 wordle-solver/
-├── wordle_solver.py   # Main solver script
-├── words.txt          # Word list (14,855 words)
-├── README.md          # This file
-├── requirements.txt   # Dependencies (none required)
-└── LICENSE            # MIT License
+├── wordle_solver.py        # Main solver script
+├── words.txt               # Full word list (14,855 words)
+├── solutions_with_freq.csv # Curated solutions + frequency (2,315 words)
+├── create_solutions_freq.py # Script to regenerate frequency data
+├── README.md               # This file
+├── requirements.txt        # Dependencies (none required)
+└── LICENSE                 # MIT License
 ```
 
 ## API Usage
@@ -199,25 +234,55 @@ wordle-solver/
 ```python
 from wordle_solver import WordleSolver
 
-# Create solver
-solver = WordleSolver(hard_mode=False, word_file="words.txt")
+# Entropy mode (default)
+solver = WordleSolver(word_file="words.txt")
+
+# Bot mode
+solver = WordleSolver(
+    bot_mode=True,
+    word_file="words.txt",
+    solutions_file="solutions_with_freq.csv"
+)
 
 # Apply guesses
 solver.apply_guess("crane", "xxxyx")
 solver.apply_guess("tonus", "xygxg")
 
-# Get recommendations
+# Get recommendations (entropy mode)
 recommendations = solver.get_best_guess(top_n=5, show_progress=False)
 for word, entropy, expected, is_possible in recommendations:
     print(f"{word}: entropy={entropy:.3f}, possible={is_possible}")
 
+# Get recommendations (bot mode)
+recommendations = solver.get_best_guess_bot(top_n=5, show_progress=False)
+for word, expected, freq_score, is_possible in recommendations:
+    print(f"{word}: expected={expected:.1f}, freq={freq_score:.3f}")
+
 # Check remaining possibilities
 print(f"Remaining: {len(solver.possible_answers)}")
-print(solver.possible_answers)
 
 # Reset for new game
 solver.reset()
 ```
+
+## Regenerating Frequency Data
+
+If you want to update the solutions list or frequency data:
+
+```bash
+# Download the source files
+# - wordle_solutions.txt from cfreshman's gist
+# - word_frequencies.txt from norvig.com/ngrams/count_1w.txt
+
+# Run the cross-reference script
+python create_solutions_freq.py
+```
+
+## Performance
+
+- **First guess**: ~15,000 × 2,315 pattern computations (~1-3 seconds in bot mode)
+- **Later guesses**: Much faster as remaining words decrease
+- **Memory**: ~2 MB for word lists
 
 ## License
 
@@ -227,7 +292,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 Contributions welcome! Some ideas:
 
-- [ ] Precompute opening word entropies for faster startup
+- [ ] Precompute opening word scores for faster startup
 - [ ] Add multi-step lookahead (computationally expensive but more optimal)
 - [ ] Web interface
 - [ ] Support for other Wordle variants (6-letter, etc.)
@@ -236,3 +301,5 @@ Contributions welcome! Some ideas:
 
 - Algorithm inspired by [3Blue1Brown's Wordle analysis](https://www.youtube.com/watch?v=v68zYyaEmEA)
 - Information theory foundations from Claude Shannon
+- Solutions list from [cfreshman's gist](https://gist.github.com/cfreshman/a03ef2cba789d8cf00c08f767e0fad7b)
+- Word frequency data from [Peter Norvig / Google Ngrams](https://norvig.com/ngrams/)
